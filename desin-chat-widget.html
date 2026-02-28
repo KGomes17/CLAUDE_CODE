@@ -15,8 +15,8 @@
   const USE_TEST_WEBHOOK = false;
   const WEBHOOK = USE_TEST_WEBHOOK ? WEBHOOK_TEST : WEBHOOK_PROD;
 
-  // Se seu Webhook Trigger estiver com Header Auth habilitado, mantenha a chave abaixo
-  const N8N_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyZjFkOTllNy05ZTkzLTQ3MDgtYmM1OS02YzUzNGMzZDhmZTgiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZGI0ODU2YTMtNjY3MS00NjI5LWEwNmMtMzA4NGExOWU5ODM4IiwiaWF0IjoxNzcyMjk3ODQxfQ.pO-vG9rCu7q5eSxGHLlajCAH4ku9AThnLMvrs4ZX74c';
+  // Deixe vazio se o Webhook Trigger não exigir autenticação por header.
+  const N8N_API_KEY = '';
   const DEBUG = true;
 
   const parseN8nReply = (data) => {
@@ -41,20 +41,38 @@
     };
 
     const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${N8N_API_KEY}`,
-      'x-n8n-api-key': N8N_API_KEY
+      // text/plain evita preflight CORS em muitos cenários e ainda envia JSON como string.
+      'Content-Type': 'text/plain;charset=UTF-8'
     };
+
+    if (N8N_API_KEY) {
+      headers.Authorization = `Bearer ${N8N_API_KEY}`;
+      headers['x-n8n-api-key'] = N8N_API_KEY;
+    }
 
     if (DEBUG) console.log('[DESIN] -> WEBHOOK', WEBHOOK, body);
 
-    const resp = await fetch(WEBHOOK, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      mode: 'cors',
-      credentials: 'omit'
-    });
+    let resp;
+    try {
+      resp = await fetch(WEBHOOK, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        mode: 'cors',
+        credentials: 'omit'
+      });
+    } catch (corsErr) {
+      if (DEBUG) console.warn('[DESIN] CORS fetch falhou, tentando no-cors para disparar webhook.', corsErr);
+      await fetch(WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify(body),
+        mode: 'no-cors',
+        credentials: 'omit'
+      });
+      // Em no-cors não dá para ler resposta, mas o trigger é disparado.
+      return '';
+    }
 
     const raw = await resp.text();
     if (DEBUG) console.log('[DESIN] <- STATUS', resp.status, raw);
