@@ -10,7 +10,14 @@
   ROOT.dataset.dcwMounted = '1';
 
   const SHADOW = ROOT.attachShadow({ mode: 'closed' });
-  const WEBHOOK = 'https://treedwellingfruitfly-n8n.cloudfy.live/webhook/a02d50d5-3357-41ae-aab8-b1a4687b9b8e';
+  const WEBHOOK_PROD = 'https://treedwellingfruitfly-n8n.cloudfy.live/webhook/a02d50d5-3357-41ae-aab8-b1a4687b9b8e';
+  const WEBHOOK_TEST = 'https://treedwellingfruitfly-n8n.cloudfy.live/webhook-test/a02d50d5-3357-41ae-aab8-b1a4687b9b8e';
+  const USE_TEST_WEBHOOK = false;
+  const WEBHOOK = USE_TEST_WEBHOOK ? WEBHOOK_TEST : WEBHOOK_PROD;
+
+  // Se seu Webhook Trigger estiver com Header Auth habilitado, mantenha a chave abaixo
+  const N8N_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyZjFkOTllNy05ZTkzLTQ3MDgtYmM1OS02YzUzNGMzZDhmZTgiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZGI0ODU2YTMtNjY3MS00NjI5LWEwNmMtMzA4NGExOWU5ODM4IiwiaWF0IjoxNzcyMjk3ODQxfQ.pO-vG9rCu7q5eSxGHLlajCAH4ku9AThnLMvrs4ZX74c';
+  const DEBUG = true;
 
   const parseN8nReply = (data) => {
     if (typeof data === 'string') return data;
@@ -25,14 +32,41 @@
   };
 
   const sendToN8n = async (payload) => {
+    const body = {
+      ...payload,
+      text: payload.message || payload.chatInput || '',
+      timestamp: new Date().toISOString(),
+      source: 'desin_widget',
+      webhookMode: USE_TEST_WEBHOOK ? 'test' : 'prod'
+    };
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${N8N_API_KEY}`,
+      'x-n8n-api-key': N8N_API_KEY
+    };
+
+    if (DEBUG) console.log('[DESIN] -> WEBHOOK', WEBHOOK, body);
+
     const resp = await fetch(WEBHOOK, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers,
+      body: JSON.stringify(body),
+      mode: 'cors',
+      credentials: 'omit'
     });
-    if (!resp.ok) throw new Error(`Webhook status ${resp.status}`);
-    const data = await resp.json();
-    return parseN8nReply(data);
+
+    const raw = await resp.text();
+    if (DEBUG) console.log('[DESIN] <- STATUS', resp.status, raw);
+    if (!resp.ok) throw new Error(`Webhook status ${resp.status}: ${raw}`);
+
+    let parsed;
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      parsed = { output: raw };
+    }
+    return parseN8nReply(parsed);
   };
 
   // Avatar 200px
@@ -177,8 +211,9 @@
         widget: 'desin_chat'
       });
       connectingScreen.classList.add('hidden'); chatScreen.classList.remove('hidden'); addMessage(reply || 'Olá! Como posso te ajudar?', 'agent'); chatInput.focus();
-    } catch (_) {
-      connectingScreen.classList.add('hidden'); chatScreen.classList.remove('hidden'); addMessage(`Olá, ${name}! Como posso te ajudar hoje?`, 'agent'); chatInput.focus();
+    } catch (err) {
+      if (DEBUG) console.error('[DESIN] start error', err);
+      connectingScreen.classList.add('hidden'); chatScreen.classList.remove('hidden'); addMessage('Não consegui conectar ao atendimento automático agora. Me envie uma mensagem e vou tentar novamente.', 'agent'); chatInput.focus();
     }
   });
 
@@ -198,8 +233,9 @@
         widget: 'desin_chat'
       });
       hideTyping(); addMessage(reply || 'Desculpe, tente novamente.', 'agent');
-    } catch (_) {
-      hideTyping(); addMessage('Desculpe, ocorreu um erro. Tente novamente.', 'agent');
+    } catch (err) {
+      if (DEBUG) console.error('[DESIN] send error', err);
+      hideTyping(); addMessage('Falha ao falar com o webhook n8n. Verifique se o workflow está ativo e tente de novo.', 'agent');
     }
   };
 
