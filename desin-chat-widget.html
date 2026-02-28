@@ -12,6 +12,29 @@
   const SHADOW = ROOT.attachShadow({ mode: 'closed' });
   const WEBHOOK = 'https://treedwellingfruitfly-n8n.cloudfy.live/webhook/a02d50d5-3357-41ae-aab8-b1a4687b9b8e';
 
+  const parseN8nReply = (data) => {
+    if (typeof data === 'string') return data;
+    if (Array.isArray(data)) {
+      const first = data[0] || {};
+      return first.output || first.reply || first.response || first.message || first.text || '';
+    }
+    if (data && typeof data === 'object') {
+      return data.output || data.reply || data.response || data.message || data.text || '';
+    }
+    return '';
+  };
+
+  const sendToN8n = async (payload) => {
+    const resp = await fetch(WEBHOOK, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error(`Webhook status ${resp.status}`);
+    const data = await resp.json();
+    return parseN8nReply(data);
+  };
+
   // Avatar 200px
   const AVATAR_URL = 'https://desin.immunewell.com.br/wp-content/uploads/2026/02/AVATAR-DESIN.webp';
 
@@ -141,9 +164,19 @@
     formScreen.classList.add('hidden'); connectingScreen.classList.remove('hidden');
 
     try {
-      const resp = await fetch(WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'start', sessionId, name, phone, message: 'Iniciar atendimento' }) });
-      const data = await resp.json(); const reply = (Array.isArray(data) ? data[0]?.output : data.output) || 'Olá! Como posso te ajudar?';
-      connectingScreen.classList.add('hidden'); chatScreen.classList.remove('hidden'); addMessage(reply, 'agent'); chatInput.focus();
+      const reply = await sendToN8n({
+        event: 'chat_started',
+        action: 'start',
+        sessionId,
+        user: { name, phone },
+        name,
+        phone,
+        message: 'Iniciar atendimento',
+        chatInput: 'Iniciar atendimento',
+        channel: 'website_widget',
+        widget: 'desin_chat'
+      });
+      connectingScreen.classList.add('hidden'); chatScreen.classList.remove('hidden'); addMessage(reply || 'Olá! Como posso te ajudar?', 'agent'); chatInput.focus();
     } catch (_) {
       connectingScreen.classList.add('hidden'); chatScreen.classList.remove('hidden'); addMessage(`Olá, ${name}! Como posso te ajudar hoje?`, 'agent'); chatInput.focus();
     }
@@ -153,9 +186,18 @@
     const text = chatInput.value.trim(); if (!text) return;
     chatInput.value = ''; addMessage(text, 'user'); showTyping();
     try {
-      const resp = await fetch(WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sendMessage', sessionId, chatInput: text, name: userName }) });
-      const data = await resp.json(); const reply = (Array.isArray(data) ? data[0]?.output : data.output) || 'Desculpe, tente novamente.';
-      hideTyping(); addMessage(reply, 'agent');
+      const reply = await sendToN8n({
+        event: 'chat_message',
+        action: 'sendMessage',
+        sessionId,
+        user: { name: userName },
+        name: userName,
+        message: text,
+        chatInput: text,
+        channel: 'website_widget',
+        widget: 'desin_chat'
+      });
+      hideTyping(); addMessage(reply || 'Desculpe, tente novamente.', 'agent');
     } catch (_) {
       hideTyping(); addMessage('Desculpe, ocorreu um erro. Tente novamente.', 'agent');
     }
